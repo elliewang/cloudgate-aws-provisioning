@@ -1,0 +1,31 @@
+# Deploy through Render Dashboard > New > Blueprint.
+# Free database expires after 30 days. This is an ephemeral team demonstration.
+services:
+  - type: web
+    name: cloudgate-demo-portal
+    runtime: docker
+    plan: free
+    region: ohio
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: render
+      - key: JAVA_TOOL_OPTIONS
+        value: -XX:MaxRAMPercentage=55.0 -XX:+ExitOnOutOfMemoryError
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cloudgate-demo-db
+          property: connectionString
+      - key: DEMO_LOGIN_USER
+        value: teamdemo
+      - key: DEMO_LOGIN_PASSWORD
+        sync: false # Required: supply a strong shared password in Render setup
+
+databases:
+  - name: cloudgate-demo-db
+    databaseName: cloudgate
+    user: cloudgate
+    plan: free
+    region: ohio
+    ipAllowList: []

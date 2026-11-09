@@ -1,0 +1,9 @@
+.git
+.github
+*.zip
+README.md
+render.yaml
+compose.yaml
+target
+.env
+**/.DS_Store

@@ -1,0 +1,73 @@
+name: Portal CI + IaC Policy Gates
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  java-and-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build and test Spring Boot
+        run: mvn -B -ntp verify
+      - name: Build demo Docker image
+        run: docker build -t cloud-portal:demo .
+      - name: Dependency vulnerability scan (critical/high)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: cloud-portal:demo
+          format: table
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+  terraform-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.13.3'
+          terraform_wrapper: false
+      - name: Install Conftest
+        run: |
+          curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.71.1/conftest_0.71.1_Linux_x86_64.tar.gz -o /tmp/conftest.tar.gz
+          echo 'Download is version-pinned; verify the release checksum before production use.'
+          tar -xzf /tmp/conftest.tar.gz conftest
+          sudo mv conftest /usr/local/bin/
+      - name: Terraform format / plan / policy tests
+        run: bash scripts/check-policy.sh
+  demo-deploy:
+    needs: [java-and-security, terraform-policy]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: demo-approval
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start ephemeral Docker demo
+        run: docker compose up -d --build
+      - name: Verify API and frontend
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8080/api/dashboard; then break; fi
+            sleep 3
+          done
+          curl -fsS http://127.0.0.1:8080/ >/dev/null
+      - name: Capture simulated deployment evidence
+        run: |
+          mkdir -p evidence
+          echo '{"mode":"DEMO","aws_resources_created":false,"status":"EPHEMERAL_LOCAL_DEPLOYMENT_VERIFIED"}' > evidence/deployment.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-deployment-evidence
+          path: evidence/
+      - name: Shutdown ephemeral environment
+        if: always()
+        run: docker compose down -v || true
